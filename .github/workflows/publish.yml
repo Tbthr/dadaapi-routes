@@ -1,0 +1,56 @@
+name: Publish signed routes
+
+on:
+  schedule:
+    - cron: "17 */4 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: route-publisher
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install --require-hashes -r requirements-lock.txt
+      - name: Generate signed encrypted bundle
+        env:
+          UPSTREAM_SUBSCRIPTION_URL: ${{ secrets.UPSTREAM_SUBSCRIPTION_URL }}
+          ROUTE_SIGNING_PRIVATE_KEY_PEM: ${{ secrets.ROUTE_SIGNING_PRIVATE_KEY_PEM }}
+          ROUTE_ENCRYPTION_KEY_B64: ${{ secrets.ROUTE_ENCRYPTION_KEY_B64 }}
+          ROUTE_KEY_ID: v1
+        run: python publisher/publish.py
+      - name: Verify publisher tests
+        run: python -m unittest discover -s tests -v
+      - name: Commit route artifacts
+        run: |
+          if git diff --quiet -- public; then exit 0; fi
+          git config user.name "dadaapi-route-bot"
+          git config user.email "route-bot@users.noreply.github.com"
+          git add public/manifest.json public/routes.sig public/routes.enc
+          git commit -m "Update signed routes"
+          git push origin HEAD:main
+      - name: Synchronize identical commit to Gitee
+        env:
+          GITEE_DEPLOY_KEY: ${{ secrets.GITEE_DEPLOY_KEY }}
+          GITEE_REPOSITORY: ${{ vars.GITEE_REPOSITORY }}
+        run: |
+          install -m 700 -d ~/.ssh
+          printf '%s' "$GITEE_DEPLOY_KEY" > ~/.ssh/gitee_route_sync
+          chmod 600 ~/.ssh/gitee_route_sync
+          ssh-keyscan -t ed25519 gitee.com > ~/.ssh/known_hosts
+          export GIT_SSH_COMMAND='ssh -i ~/.ssh/gitee_route_sync -o IdentitiesOnly=yes'
+          git push --force "git@gitee.com:${GITEE_REPOSITORY}.git" HEAD:main
+
