@@ -44,13 +44,16 @@ jobs:
           git push origin HEAD:main
       - name: Synchronize identical commit to Gitee
         env:
-          GITEE_DEPLOY_KEY: ${{ secrets.GITEE_DEPLOY_KEY }}
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           GITEE_REPOSITORY: ${{ vars.GITEE_REPOSITORY }}
         run: |
-          install -m 700 -d ~/.ssh
-          printf '%s' "$GITEE_DEPLOY_KEY" > ~/.ssh/gitee_route_sync
-          chmod 600 ~/.ssh/gitee_route_sync
-          ssh-keyscan -t ed25519 gitee.com > ~/.ssh/known_hosts
-          export GIT_SSH_COMMAND='ssh -i ~/.ssh/gitee_route_sync -o IdentitiesOnly=yes'
-          git push --force "git@gitee.com:${GITEE_REPOSITORY}.git" HEAD:main
-
+          cat > "$RUNNER_TEMP/gitee-askpass.sh" <<'EOF'
+          #!/bin/sh
+          case "$1" in
+            *Username*) printf '%s' "${GITEE_REPOSITORY%%/*}" ;;
+            *) printf '%s' "$GITEE_TOKEN" ;;
+          esac
+          EOF
+          chmod 700 "$RUNNER_TEMP/gitee-askpass.sh"
+          GIT_ASKPASS="$RUNNER_TEMP/gitee-askpass.sh" GIT_TERMINAL_PROMPT=0 \
+            git push --force "https://gitee.com/${GITEE_REPOSITORY}.git" HEAD:main
