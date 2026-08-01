@@ -47,6 +47,11 @@ jobs:
           GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
           GITEE_REPOSITORY: ${{ vars.GITEE_REPOSITORY }}
         run: |
+          set -euo pipefail
+          if [ -z "$GITEE_TOKEN" ] || ! [[ "$GITEE_REPOSITORY" =~ ^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$ ]]; then
+            echo "::error title=Missing Gitee mirror configuration::Configure GITEE_TOKEN and GITEE_REPOSITORY before publishing routes."
+            exit 1
+          fi
           cat > "$RUNNER_TEMP/gitee-askpass.sh" <<'EOF'
           #!/bin/sh
           case "$1" in
@@ -56,4 +61,4 @@ jobs:
           EOF
           chmod 700 "$RUNNER_TEMP/gitee-askpass.sh"
           GIT_ASKPASS="$RUNNER_TEMP/gitee-askpass.sh" GIT_TERMINAL_PROMPT=0 \
-            git push --force "https://gitee.com/${GITEE_REPOSITORY}.git" HEAD:main
+            git push "https://gitee.com/${GITEE_REPOSITORY}.git" HEAD:main

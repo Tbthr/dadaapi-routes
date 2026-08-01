@@ -20,8 +20,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from nacl.bindings import crypto_aead_xchacha20poly1305_ietf_encrypt
 
-MAGIC = b"WCRTE001"
-AAD = b"wocao-hub-routes/v1"
+ROUTE_MAGIC = b"DADAR002"
+ROUTE_AAD = b"dadaapi-routes/v2"
+ROUTE_SCHEMA_VERSION = 2
 MAX_SUBSCRIPTION_BYTES = 8 * 1024 * 1024
 ALLOWED_REDIRECTS = 5
 EXPIRES_AFTER = timedelta(hours=72)
@@ -44,14 +45,26 @@ def main() -> None:
     if not key_id:
         raise RuntimeError("ROUTE_KEY_ID cannot be empty")
 
+    generated_at = datetime.now(timezone.utc).replace(microsecond=0)
+    files = build_bundle(routes, encryption_key, signing_key, key_id, generated_at)
+    atomic_publish(args.output, files)
+    print(f"published {len(routes)} compatible routes as {generated_at.strftime('%Y%m%dT%H%M%SZ')}")
+
+
+def build_bundle(
+    routes: list[str],
+    encryption_key: bytes,
+    signing_key: Ed25519PrivateKey,
+    key_id: str,
+    generated_at: datetime,
+) -> dict[str, bytes]:
     plaintext = ("\n".join(routes) + "\n").encode()
     nonce = os.urandom(24)
-    encrypted = MAGIC + nonce + crypto_aead_xchacha20poly1305_ietf_encrypt(
-        plaintext, AAD, nonce, encryption_key
+    encrypted = ROUTE_MAGIC + nonce + crypto_aead_xchacha20poly1305_ietf_encrypt(
+        plaintext, ROUTE_AAD, nonce, encryption_key
     )
-    generated_at = datetime.now(timezone.utc).replace(microsecond=0)
     manifest = {
-        "schemaVersion": 1,
+        "schemaVersion": ROUTE_SCHEMA_VERSION,
         "version": generated_at.strftime("%Y%m%dT%H%M%SZ"),
         "generatedAt": generated_at.isoformat().replace("+00:00", "Z"),
         "expiresAt": (generated_at + EXPIRES_AFTER).isoformat().replace("+00:00", "Z"),
@@ -63,12 +76,11 @@ def main() -> None:
     }
     manifest_bytes = (json.dumps(manifest, ensure_ascii=False, indent=2) + "\n").encode()
     signature = base64.b64encode(signing_key.sign(manifest_bytes)) + b"\n"
-    atomic_publish(args.output, {
+    return {
         "manifest.json": manifest_bytes,
         "routes.sig": signature,
         "routes.enc": encrypted,
-    })
-    print(f"published {len(routes)} compatible routes as {manifest['version']}")
+    }
 
 
 def fetch_subscription() -> bytes:
